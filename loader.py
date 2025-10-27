@@ -2,9 +2,10 @@
 Script to load geographical data into a pandas DataFrame,
 and save it as a CSV file.
 '''
-import numpy as np
-import pandas as pd
 from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import pandas as pd
+import numpy as np
 
 
 def get_geolocator(agent='h501-student'):
@@ -24,14 +25,40 @@ def get_geolocator(agent='h501-student'):
     return Nominatim(user_agent=agent)
 
 
-def fetch_location_data(geolocator, loc):
+def get_rate_limited_geocoder(geolocator, min_delay=1.0):
+    """
+    Create a rate-limited geocoder to comply with Nominatim usage policy.
+
+    Parameters
+    ----------
+    geolocator : Nominatim
+        The geolocator instance to wrap
+    min_delay : float, optional
+        Minimum delay between requests in seconds, by default 1.0
+
+    Returns
+    -------
+    RateLimiter
+        A rate-limited geocoding function
+    """
+    return RateLimiter(
+        geolocator.geocode,
+        min_delay_seconds=min_delay,
+        max_retries=2,
+        error_wait_seconds=5.0,
+        swallow_exceptions=True,
+        return_value_on_exception=None
+    )
+
+
+def fetch_location_data(geocode_func, loc):
     """
     Fetch location data for a given location string.
 
     Parameters
     ----------
-    geolocator : Nominatim
-        The geolocator instance to use
+    geocode_func : callable
+        The geocoding function to use (rate-limited)
     loc : str
         The location string to geocode
 
@@ -41,7 +68,7 @@ def fetch_location_data(geolocator, loc):
         Dictionary with location data, or NaN values if location not found
     """
     try:
-        location = geolocator.geocode(loc)
+        location = geocode_func(loc)
         if location is None:
             return {
                 "location": loc,
@@ -81,7 +108,11 @@ def build_geo_dataframe(geolocator, locations):
     pd.DataFrame
         DataFrame containing geocoded location data
     """
-    geo_data = [fetch_location_data(geolocator, loc) for loc in locations]
+    # Create rate-limited geocoder
+    geocode = get_rate_limited_geocoder(geolocator)
+    
+    # Geocode all locations with rate limiting
+    geo_data = [fetch_location_data(geocode, loc) for loc in locations]
     return pd.DataFrame(geo_data)
 
 
